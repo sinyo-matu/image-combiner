@@ -32,12 +32,13 @@ async fn test_processor() {
         image_bytes.push(image_byte);
     }
     println!("get {} pics", image_bytes.len());
-    let processor = ProcessorBuilder::new()
+    let processor = Processor::new();
+    let option = CreateBundledImageOptionsBuilder::new()
         .set_column(2)
         .set_padding(20)
         .build();
     let image_bytes = processor
-        .create_bundled_image_from_bytes(image_bytes)
+        .create_bundled_image_from_bytes(image_bytes, option)
         .await
         .unwrap();
     // image::load_from_memory(&image_bytes)

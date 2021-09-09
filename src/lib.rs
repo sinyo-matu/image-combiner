@@ -1,7 +1,7 @@
 mod test;
 
 use image::error::ImageError;
-use image::{DynamicImage, GenericImageView, ImageBuffer};
+use image::{DynamicImage, GenericImage, GenericImageView, ImageBuffer};
 use log::debug;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,15 +26,17 @@ impl From<JoinError> for ProcessorError {
     }
 }
 
-pub struct Processor {
-    dimension: Option<(u32, u32)>,
-    padding: u32,
-    column: u32,
-}
+pub struct Processor;
+
 impl Processor {
+    pub fn new() -> Self {
+        Self
+    }
+
     pub async fn create_bundled_image_from_bytes(
         &self,
         buffers: Vec<Vec<u8>>,
+        options: CreateBundledImageOptions,
     ) -> Result<Vec<u8>, ProcessorError> {
         debug!("process {} images into 1", buffers.len());
         let mut origin_images: Vec<DynamicImage> = Vec::new();
@@ -42,7 +44,7 @@ impl Processor {
             let origin_image = image::load_from_memory(&buf)?;
             origin_images.push(origin_image);
         }
-        let (width, height) = match self.dimension {
+        let (width, height) = match options.dimension {
             Some(user_setting_dimension) => user_setting_dimension,
             None => find_optical_dimension(&origin_images),
         };
@@ -63,29 +65,28 @@ impl Processor {
         for handle in resized_images_handles {
             resize_images.push(handle.await?)
         }
-        let row = (resize_images.len() as f32 / self.column as f32).ceil() as u32;
+        let row = (resize_images.len() as f32 / options.column as f32).ceil() as u32;
         let canvas_height = if row >= 1 {
-            height + self.padding
+            height + options.padding
         } else {
             height
         };
-        let canvas_width = if self.column >= 1 {
-            width + self.padding
+        let canvas_width = if options.column >= 1 {
+            width + options.padding
         } else {
             width
         };
         let target_height = row * canvas_height;
-        let target_width = self.column * canvas_width;
+        let target_width = options.column * canvas_width;
         debug!("create image buf {}x{}", target_width, target_height);
         let image_buf = ImageBuffer::from_fn(target_width, target_height, |_, _| {
             image::Rgba([255, 255, 255, 0] as [u8; 4])
         });
         let image_buf_threaded = Arc::new(Mutex::new(image_buf));
-        let mut handles: Vec<JoinHandle<()>> = Vec::new();
+        let mut handles: Vec<JoinHandle<Result<(), ProcessorError>>> = Vec::new();
         for (i, image) in resize_images.into_iter().enumerate() {
             let cloned_image_buf = Arc::clone(&image_buf_threaded);
-            let column = self.column;
-            let canvas_width = canvas_width;
+            let column = options.column;
             let handle = tokio::spawn(async move {
                 let current_column = (i as u32 % column) as u32;
                 let current_row = (i as u32 / column) as u32;
@@ -97,18 +98,18 @@ impl Processor {
                     buf = sub / 2;
                 }
                 let mut image_buf = cloned_image_buf.lock().await;
-                for (x, y, pixel) in image.enumerate_pixels() {
-                    let buf_x = x + current_column * canvas_width;
-                    let buf_y = y + current_row * canvas_height + buf;
-                    let target_pixel = image_buf.get_pixel_mut(buf_x, buf_y);
-                    *target_pixel = pixel.to_owned();
-                }
+                image_buf.copy_from(
+                    &image,
+                    current_column * canvas_width,
+                    current_row * canvas_height + buf,
+                )?;
+                Ok(())
             });
             handles.push(handle)
         }
 
         for handle in handles {
-            handle.await?;
+            handle.await??;
         }
         let dyn_image = DynamicImage::ImageRgba8(image_buf_threaded.lock_owned().await.to_owned());
         let mut image_bytes = Vec::new();
@@ -116,14 +117,28 @@ impl Processor {
         Ok(image_bytes)
     }
 }
+pub struct CreateBundledImageOptions {
+    dimension: Option<(u32, u32)>,
+    padding: u32,
+    column: u32,
+}
 
-pub struct ProcessorBuilder {
+impl CreateBundledImageOptions {
+    pub fn new(dimension: Option<(u32, u32)>, padding: u32, column: u32) -> Self {
+        Self {
+            dimension,
+            padding,
+            column,
+        }
+    }
+}
+pub struct CreateBundledImageOptionsBuilder {
     member_dimension: Option<(u32, u32)>,
     column: Option<u32>,
     padding: Option<u32>,
 }
 
-impl ProcessorBuilder {
+impl CreateBundledImageOptionsBuilder {
     pub fn new() -> Self {
         Self {
             member_dimension: None,
@@ -147,7 +162,7 @@ impl ProcessorBuilder {
         self
     }
 
-    pub fn build(&self) -> Processor {
+    pub fn build(&self) -> CreateBundledImageOptions {
         let padding = match self.padding {
             Some(padding) => padding,
             None => 20,
@@ -156,11 +171,7 @@ impl ProcessorBuilder {
             Some(column) => column,
             None => 1,
         };
-        Processor {
-            dimension: self.member_dimension,
-            padding,
-            column,
-        }
+        CreateBundledImageOptions::new(self.member_dimension, padding, column)
     }
 }
 
