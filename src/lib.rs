@@ -93,10 +93,11 @@ impl Processor {
         Ok(image_bytes)
     }
 
-    pub async fn add_table(
+    pub async fn add_table<'a>(
         &self,
         buffer: Vec<u8>,
         table_base: TableBase,
+        font_bytes: &'a [u8],
     ) -> Result<Vec<u8>, ProcessorError> {
         let origin_image = image::load_from_memory(&buffer)?;
         let padding = origin_image.width() as f32 * 0.05;
@@ -128,8 +129,7 @@ impl Processor {
         {
             let mut table_canvas =
                 full_canvas.sub_image(0, 0, origin_image.width(), table_canvas_height);
-            let font_bytes: &[u8] = include_bytes!("../test/GenSekiGothic-R.ttc");
-            let font: Font<'static> = Font::try_from_bytes(font_bytes).unwrap();
+            let font: Font<'a> = Font::try_from_bytes(font_bytes).unwrap();
             for (top, left, text) in
                 table.text_top_left_position(padding, table_canvas.width() as f32, cell_padding_y)
             {

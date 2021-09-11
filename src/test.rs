@@ -62,7 +62,7 @@ async fn text_add_table() {
         .build();
     simplelog::SimpleLogger::init(simplelog::LevelFilter::Debug, config).unwrap();
     let processor = Processor::new();
-    let origin_image = include_bytes!("../test/A2113PE_225_bundled_column2.jpeg").to_vec();
+    let origin_image = std::fs::read("./test/A2113PE_225_bundled_column2.jpeg").unwrap();
     let head = vec![
         "SIZE".to_string(),
         "裙长".to_string(),
@@ -91,8 +91,11 @@ async fn text_add_table() {
     body.push(row1);
     body.push(row2);
     let table = TableBase::new(head, body, 2).unwrap();
-
-    let new_image = processor.add_table(origin_image, table).await.unwrap();
+    let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
+    let new_image = processor
+        .add_table(origin_image, table, &font_bytes)
+        .await
+        .unwrap();
     std::fs::write("./test/add_table.jpeg", &new_image).unwrap();
 }
 
@@ -162,9 +165,9 @@ async fn test_create_bundle_with_table() {
     body.push(row1);
     body.push(row2);
     let table = TableBase::new(head, body, 2).unwrap();
-    let font_bytes: &[u8] = include_bytes!("../test/TaipeiSansTCBeta-Light.ttf");
+    let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
     let image_bytes = processor
-        .create_bundled_image_from_bytes_with_table(image_bytes, table, option, font_bytes)
+        .create_bundled_image_from_bytes_with_table(image_bytes, table, option, &font_bytes)
         .await
         .unwrap();
     // image::load_from_memory(&image_bytes)
@@ -219,13 +222,13 @@ async fn test_create_bundle_with_text() {
         .set_column(2)
         .set_padding(20)
         .build();
-    let font_bytes: &[u8] = include_bytes!("../test/TaipeiSansTCBeta-Light.ttf");
+    let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
     let image_bytes = processor
         .create_bundled_image_from_bytes_with_text(
             image_bytes,
             "身长65.0 肩宽46.0 身宽55.0 袖长57.0",
             option,
-            font_bytes,
+            &font_bytes,
         )
         .await
         .unwrap();
