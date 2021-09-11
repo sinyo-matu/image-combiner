@@ -14,7 +14,7 @@ use tokio::{sync::Mutex, task::JoinHandle};
 pub enum ProcessorError {
     ImageProcessError(ImageError),
     RuntimeError(JoinError),
-    InvalidTableError,
+    InvalidTableError(String),
     InvalidTextError,
 }
 
@@ -110,7 +110,11 @@ impl Processor {
         debug!("table width is {}", table.table_width());
         if table.table_width() > origin_image.width() as f32 {
             debug!("table width would be bigger than origin image width return error");
-            return Err(ProcessorError::InvalidTableError);
+            return Err(ProcessorError::InvalidTableError(format!(
+                "table size over table width is {},canvas width is {}",
+                table.table_width(),
+                origin_image.width()
+            )));
         };
 
         let table_canvas_height = table.table_height().ceil() as u32 + padding as u32 * 2;
@@ -203,7 +207,11 @@ impl Processor {
         let table_canvas_width = table.table_width() + padding * 2.0;
         if table_canvas_width.ceil() as u32 > bundled_image_canvas_width {
             debug!("table width would be bigger than origin image width return error");
-            return Err(ProcessorError::InvalidTableError);
+            return Err(ProcessorError::InvalidTableError(format!(
+                "table size over table width is {},canvas width is {}",
+                table_canvas_width.ceil() as u32,
+                bundled_image_canvas_width
+            )));
         };
 
         let full_canvas_height = bundled_image_canvas_height + table_canvas_height;
@@ -356,7 +364,12 @@ impl TableBase {
     ) -> Result<Self, ProcessorError> {
         for row in body.iter() {
             if row.len() != head.len() {
-                return Err(ProcessorError::InvalidTableError);
+                debug!("body colum is not equal to head column");
+                return Err(ProcessorError::InvalidTableError(format!(
+                    "body colum is not equal to head column head:{},body:{}",
+                    head.len(),
+                    row.len()
+                )));
             }
         }
         Ok(Self {
