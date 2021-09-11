@@ -226,7 +226,7 @@ async fn test_create_bundle_with_text() {
     let image_bytes = processor
         .create_bundled_image_from_bytes_with_text(
             image_bytes,
-            "身长65.0 肩宽46.0 身宽55.0 袖长57.0",
+            "长60.0，肩宽42.0，体宽52.5，袖长26.5，袖口16.0",
             option,
             &font_bytes,
         )

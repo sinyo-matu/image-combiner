@@ -15,7 +15,7 @@ pub enum ProcessorError {
     ImageProcessError(ImageError),
     RuntimeError(JoinError),
     InvalidTableError(String),
-    InvalidTextError,
+    InvalidTextError(String),
 }
 
 impl From<ImageError> for ProcessorError {
@@ -300,7 +300,11 @@ impl Processor {
         debug!("font size is {}", font_size);
         let text_canvas_width = calc_chars_len(text) as f32 * font_size + padding * 2.0;
         if text_canvas_width.ceil() as u32 > bundled_image_canvas_width {
-            return Err(ProcessorError::InvalidTextError);
+            return Err(ProcessorError::InvalidTextError(format!(
+                "text canvas width is bigger than image canvas text:{},image:{}",
+                text_canvas_width.ceil() as u32,
+                bundled_image_canvas_width
+            )));
         }
         let text_canvas_height = (font_size + padding * 2.0).ceil() as u32;
 
