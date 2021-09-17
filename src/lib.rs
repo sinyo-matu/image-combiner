@@ -352,6 +352,56 @@ impl Processor {
         dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
         Ok(image_bytes)
     }
+
+    pub async fn create_table_image<'a>(
+        &self,
+        table_base: TableBase,
+        font_bytes: &'a [u8],
+    ) -> Result<Vec<u8>, ProcessorError> {
+        let canvas_width = 960u32;
+
+        let padding = canvas_width as f32 * 0.05;
+        let font_size = (canvas_width as f32 - padding * 2.0) * 0.03;
+        debug!("font size is {}", font_size);
+        let cell_padding_x = font_size * 0.75;
+        let cell_padding_y = font_size * 0.25;
+        let table = table_base.build(cell_padding_x, cell_padding_y, font_size);
+        let table_canvas_height = table.table_height().ceil() as u32 + padding.ceil() as u32 * 2;
+        let table_canvas_width = table.table_width() + padding * 2.0;
+        if table_canvas_width.ceil() as u32 > canvas_width {
+            debug!("table width would be bigger than origin image width return error");
+            return Err(ProcessorError::InvalidTableError(format!(
+                "table size over table width is {},canvas width is {}",
+                table_canvas_width.ceil() as u32,
+                canvas_width
+            )));
+        };
+
+        let mut image_buf =
+            ImageBuffer::from_fn(canvas_width, table_canvas_height, |_, _| WHITE_COLOR);
+        let font: Font<'a> = Font::try_from_bytes(font_bytes).unwrap();
+        for (top, left, text) in
+            table.text_top_left_position(padding, canvas_width as f32, cell_padding_y)
+        {
+            draw_text_mut(
+                &mut image_buf,
+                BLACK_COLOR,
+                left.ceil() as u32,
+                top.ceil() as u32,
+                Scale::uniform(font_size),
+                &font,
+                text,
+            );
+        }
+        for (start, end) in table.table_line_position(padding, canvas_width as f32) {
+            draw_line_segment_mut(&mut image_buf, start, end, GRAY_COLOR);
+        }
+
+        let dyn_image = DynamicImage::ImageRgba8(image_buf);
+        let mut image_bytes = Vec::new();
+        dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
+        Ok(image_bytes)
+    }
 }
 
 pub struct TableBase {

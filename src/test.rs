@@ -197,8 +197,8 @@ async fn test_create_bundle_with_text() {
         .build();
     simplelog::SimpleLogger::init(simplelog::LevelFilter::Debug, config).unwrap();
     let s3_client = S3Client::new(Region::ApNortheast1);
-    let item_code = "A2103UCS071";
-    let image_count = 11;
+    let item_code = "A2113FB_168";
+    let image_count = 16;
     let mut image_bytes: Vec<Vec<u8>> = Vec::new();
     for no in 1..=image_count {
         let request = GetObjectRequest {
@@ -226,7 +226,7 @@ async fn test_create_bundle_with_text() {
     let image_bytes = processor
         .create_bundled_image_from_bytes_with_text(
             image_bytes,
-            "长60.0，肩宽42.0，体宽52.5，袖长26.5，袖口16.0",
+            &"长60.0，肩宽42.0，体宽52.5，袖长26.5，袖口16.0".replace("，", " "),
             option,
             &font_bytes,
         )
@@ -244,4 +244,45 @@ async fn test_create_bundle_with_text() {
     //     ..Default::default()
     // };
     // s3_client.put_object(put_request).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 20)]
+async fn text_create_table_image() {
+    use super::*;
+    let processor = Processor::new();
+    let head = vec![
+        "SIZE".to_string(),
+        "裙长".to_string(),
+        "腰围".to_string(),
+        "肩宽".to_string(),
+        "颈宽".to_string(),
+        "身长".to_string(),
+    ];
+    let row1 = vec![
+        "M".to_string(),
+        "88".to_string(),
+        "88".to_string(),
+        "88".to_string(),
+        "88".to_string(),
+        "88".to_string(),
+    ];
+    let row2 = vec![
+        "M".to_string(),
+        "88".to_string(),
+        "88".to_string(),
+        "88".to_string(),
+        "88".to_string(),
+        "88".to_string(),
+    ];
+    let mut body = Vec::new();
+    body.push(row1);
+    body.push(row2);
+    let table = TableBase::new(head, body, 2).unwrap();
+    let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
+    let image_bytes = processor
+        .create_table_image(table, &font_bytes)
+        .await
+        .unwrap();
+
+    std::fs::write("./test/table.jpg", &image_bytes).unwrap();
 }
