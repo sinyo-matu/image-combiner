@@ -286,3 +286,29 @@ async fn text_create_table_image() {
 
     std::fs::write("./test/table.jpg", &image_bytes).unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 20)]
+async fn test_create_text_image() {
+    use super::*;
+    let processor = Processor::new();
+    let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
+    let image_bytes = processor
+        .create_text_image(
+            &"长60.0，肩宽42.0，体宽52.5，袖长26.5，袖口16.0".replace("，", " "),
+            &font_bytes,
+        )
+        .await
+        .unwrap();
+    // image::load_from_memory(&image_bytes)
+    //     .unwrap()
+    //     .save(format!("{}_bundled.jpeg", item_code))
+    //     .unwrap();
+    std::fs::write("./test/text_image.jpg", &image_bytes).unwrap();
+    // let put_request = rusoto_s3::PutObjectRequest {
+    //     bucket: "phitemspics".to_string(),
+    //     body: Some(image_bytes.into()),
+    //     key: format!("{}_bundled.jpeg", item_code),
+    //     ..Default::default()
+    // };
+    // s3_client.put_object(put_request).await.unwrap();
+}

@@ -402,6 +402,45 @@ impl Processor {
         dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
         Ok(image_bytes)
     }
+
+    pub async fn create_text_image<'a>(
+        &self,
+        text: &'a str,
+        font_bytes: &'a [u8],
+    ) -> Result<Vec<u8>, ProcessorError> {
+        let canvas_width = 960u32;
+
+        let padding = canvas_width as f32 * 0.05;
+        let font_size = (canvas_width as f32 - padding * 2.0) * 0.03;
+        debug!("font size is {}", font_size);
+        let text_canvas_width = calc_chars_len(text) as f32 * font_size + padding * 2.0;
+        if text_canvas_width.ceil() as u32 > canvas_width {
+            return Err(ProcessorError::InvalidTextError(format!(
+                "text canvas width is bigger than image canvas text:{},image:{}",
+                text_canvas_width.ceil() as u32,
+                canvas_width
+            )));
+        }
+        let text_canvas_height = (font_size + padding * 2.0).ceil() as u32;
+        let mut text_canvas =
+            ImageBuffer::from_fn(canvas_width, text_canvas_height, |_, _| WHITE_COLOR);
+
+        let font: Font<'a> = Font::try_from_bytes(font_bytes).unwrap();
+        draw_text_mut(
+            &mut text_canvas,
+            BLACK_COLOR,
+            padding.ceil() as u32,
+            padding.ceil() as u32,
+            Scale::uniform(font_size),
+            &font,
+            text,
+        );
+
+        let dyn_image = DynamicImage::ImageRgba8(text_canvas);
+        let mut image_bytes = Vec::new();
+        dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
+        Ok(image_bytes)
+    }
 }
 
 pub struct TableBase {
