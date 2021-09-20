@@ -251,32 +251,21 @@ async fn text_create_table_image() {
     use super::*;
     let processor = Processor::new();
     let head = vec![
-        "SIZE".to_string(),
-        "裙长".to_string(),
-        "腰围".to_string(),
-        "肩宽".to_string(),
-        "颈宽".to_string(),
-        "身长".to_string(),
+        "尺寸".to_string(),
+        "大小".to_string(),
+        "脚背周长".to_string(),
+        "鞋跟高度".to_string(),
+        "鞋底宽度".to_string(),
     ];
     let row1 = vec![
-        "M".to_string(),
-        "88".to_string(),
-        "88".to_string(),
-        "88".to_string(),
-        "88".to_string(),
-        "88".to_string(),
-    ];
-    let row2 = vec![
-        "M".to_string(),
-        "88".to_string(),
-        "88".to_string(),
-        "88".to_string(),
-        "88".to_string(),
-        "88".to_string(),
+        "S".to_string(),
+        "22.5".to_string(),
+        "14".to_string(),
+        "2".to_string(),
+        "7.5".to_string(),
     ];
     let mut body = Vec::new();
     body.push(row1);
-    body.push(row2);
     let table = TableBase::new(head, body, 2).unwrap();
     let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
     let image_bytes = processor

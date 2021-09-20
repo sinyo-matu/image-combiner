@@ -581,14 +581,14 @@ impl Table {
         let column_line_start_y = padding;
         let column_line_end_y = (self.border_width - 1) as f32 + padding + self.table_height();
         for border_shift in 0..self.border_width {
+            let mut current_column_line_x = border_shift as f32 + row_line_start_x;
             for (i, column) in self.head.iter().enumerate() {
-                let column_line_x =
-                    border_shift as f32 + row_line_start_x + i as f32 * column.width;
                 let column_top_line = (
-                    (column_line_x, column_line_start_y),
-                    (column_line_x, column_line_end_y),
+                    (current_column_line_x, column_line_start_y),
+                    (current_column_line_x, column_line_end_y),
                 );
-                res.push(column_top_line)
+                res.push(column_top_line);
+                current_column_line_x += column.width;
             }
         }
 
