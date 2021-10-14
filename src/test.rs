@@ -283,7 +283,7 @@ async fn test_create_text_image() {
     let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
     let image_bytes = processor
         .create_text_image(
-            &"长60.0，肩宽42.0，体宽52.5，袖长26.5，袖口16.0".replace("，", " "),
+            &"长122.0，肩宽38.0，体宽57.0，袖长30.0，袖口16.0（弹性）。".replace("，", " "),
             &font_bytes,
         )
         .await

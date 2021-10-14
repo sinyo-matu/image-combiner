@@ -93,11 +93,11 @@ impl Processor {
         Ok(image_bytes)
     }
 
-    pub async fn add_table<'a>(
+    pub async fn add_table(
         &self,
         buffer: Vec<u8>,
         table_base: TableBase,
-        font_bytes: &'a [u8],
+        font_bytes: &'_ [u8],
     ) -> Result<Vec<u8>, ProcessorError> {
         let origin_image = image::load_from_memory(&buffer)?;
         let padding = origin_image.width() as f32 * 0.05;
@@ -133,7 +133,7 @@ impl Processor {
         {
             let mut table_canvas =
                 full_canvas.sub_image(0, 0, origin_image.width(), table_canvas_height);
-            let font: Font<'a> = Font::try_from_bytes(font_bytes).unwrap();
+            let font: Font<'_> = Font::try_from_bytes(font_bytes).unwrap();
             for (top, left, text) in
                 table.text_top_left_position(padding, table_canvas.width() as f32, cell_padding_y)
             {
@@ -169,12 +169,12 @@ impl Processor {
         Ok(image_bytes)
     }
 
-    pub async fn create_bundled_image_from_bytes_with_table<'a>(
+    pub async fn create_bundled_image_from_bytes_with_table(
         &self,
         buffers: Vec<Vec<u8>>,
         table_base: TableBase,
         options: CreateBundledImageOptions,
-        font_bytes: &'a [u8],
+        font_bytes: &'_ [u8],
     ) -> Result<Vec<u8>, ProcessorError> {
         debug!("process {} images into 1", buffers.len());
         let origin_images = load_images_from_vec(buffers)?;
@@ -238,7 +238,7 @@ impl Processor {
             let mut image_buf_lock = image_buf_threaded.lock().await;
             let mut table_canvas =
                 image_buf_lock.sub_image(0, 0, bundled_image_canvas_width, table_canvas_height);
-            let font: Font<'a> = Font::try_from_bytes(font_bytes).unwrap();
+            let font: Font<'_> = Font::try_from_bytes(font_bytes).unwrap();
             for (top, left, text) in table.text_top_left_position(
                 padding,
                 bundled_image_canvas_width as f32,
@@ -353,10 +353,10 @@ impl Processor {
         Ok(image_bytes)
     }
 
-    pub async fn create_table_image<'a>(
+    pub async fn create_table_image(
         &self,
         table_base: TableBase,
-        font_bytes: &'a [u8],
+        font_bytes: &'_ [u8],
     ) -> Result<Vec<u8>, ProcessorError> {
         let canvas_width = 960u32;
 
@@ -379,7 +379,7 @@ impl Processor {
 
         let mut image_buf =
             ImageBuffer::from_fn(canvas_width, table_canvas_height, |_, _| WHITE_COLOR);
-        let font: Font<'a> = Font::try_from_bytes(font_bytes).unwrap();
+        let font: Font<'_> = Font::try_from_bytes(font_bytes).unwrap();
         for (top, left, text) in
             table.text_top_left_position(padding, canvas_width as f32, cell_padding_y)
         {
@@ -408,18 +408,14 @@ impl Processor {
         text: &'a str,
         font_bytes: &'a [u8],
     ) -> Result<Vec<u8>, ProcessorError> {
-        let canvas_width = 960u32;
+        let mut canvas_width = 960u32;
 
         let padding = canvas_width as f32 * 0.05;
         let font_size = (canvas_width as f32 - padding * 2.0) * 0.03;
         debug!("font size is {}", font_size);
         let text_canvas_width = calc_chars_len(text) as f32 * font_size + padding * 2.0;
         if text_canvas_width.ceil() as u32 > canvas_width {
-            return Err(ProcessorError::InvalidTextError(format!(
-                "text canvas width is bigger than image canvas text:{},image:{}",
-                text_canvas_width.ceil() as u32,
-                canvas_width
-            )));
+            canvas_width = text_canvas_width.ceil() as u32 + 100;
         }
         let text_canvas_height = (font_size + padding * 2.0).ceil() as u32;
         let mut text_canvas =
@@ -539,7 +535,7 @@ impl Table {
         for cell in self.head.iter() {
             let head_text_left = current_cell_x + cell.width * 0.5 - cell.text_len * 0.5;
             res.push((head_text_top, head_text_left, &cell.text));
-            current_cell_x = current_cell_x + cell.width;
+            current_cell_x += cell.width;
         }
         //draw table body
         for (i, row) in self.body.iter().enumerate() {
@@ -549,7 +545,7 @@ impl Table {
             for cell in row.iter() {
                 let body_text_left = current_cell_x + cell.width * 0.5 - cell.text_len * 0.5;
                 res.push((body_text_top, body_text_left, &cell.text));
-                current_cell_x = current_cell_x + cell.width;
+                current_cell_x += cell.width;
             }
         }
         res
@@ -679,14 +675,8 @@ impl CreateBundledImageOptionsBuilder {
     }
 
     pub fn build(&self) -> CreateBundledImageOptions {
-        let padding = match self.padding {
-            Some(padding) => padding,
-            None => 20,
-        };
-        let column = match self.column {
-            Some(column) => column,
-            None => 1,
-        };
+        let padding = self.padding.unwrap_or(20);
+        let column = self.column.unwrap_or(1);
         CreateBundledImageOptions::new(self.member_dimension, padding, column)
     }
 }
@@ -779,7 +769,7 @@ async fn draw_bundled_image(
     Ok(())
 }
 
-fn find_optical_dimension(origin_images: &Vec<DynamicImage>) -> (u32, u32) {
+fn find_optical_dimension(origin_images: &[DynamicImage]) -> (u32, u32) {
     let mut dimension_map: HashMap<(u32, u32), u8> = std::collections::HashMap::new();
     let mut max_dimension = (0, 0);
     let mut max_count = 0;
