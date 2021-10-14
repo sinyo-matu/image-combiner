@@ -31,7 +31,7 @@ async fn test_processor() {
         image_bytes.push(image_byte);
     }
     println!("get {} pics", image_bytes.len());
-    let processor = Processor::new();
+    let processor = Processor::default();
     let option = CreateBundledImageOptionsBuilder::new()
         .set_column(2)
         .set_padding(20)
@@ -61,7 +61,7 @@ async fn text_add_table() {
         .set_time_format("%F:%T".to_string())
         .build();
     simplelog::SimpleLogger::init(simplelog::LevelFilter::Debug, config).unwrap();
-    let processor = Processor::new();
+    let processor = Processor::default();
     let origin_image = std::fs::read("./test/A2113PE_225_bundled_column2.jpeg").unwrap();
     let head = vec![
         "SIZE".to_string(),
@@ -87,9 +87,7 @@ async fn text_add_table() {
         "88".to_string(),
         "88".to_string(),
     ];
-    let mut body = Vec::new();
-    body.push(row1);
-    body.push(row2);
+    let body = vec![row1, row2];
     let table = TableBase::new(head, body, 2).unwrap();
     let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
     let new_image = processor
@@ -132,7 +130,7 @@ async fn test_create_bundle_with_table() {
         image_bytes.push(image_byte);
     }
     println!("get {} pics", image_bytes.len());
-    let processor = Processor::new();
+    let processor = Processor::default();
     let option = CreateBundledImageOptionsBuilder::new()
         .set_column(2)
         .set_padding(20)
@@ -161,9 +159,7 @@ async fn test_create_bundle_with_table() {
         "88".to_string(),
         "88".to_string(),
     ];
-    let mut body = Vec::new();
-    body.push(row1);
-    body.push(row2);
+    let body = vec![row1, row2];
     let table = TableBase::new(head, body, 2).unwrap();
     let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
     let image_bytes = processor
@@ -217,7 +213,7 @@ async fn test_create_bundle_with_text() {
         image_bytes.push(image_byte);
     }
     println!("get {} pics", image_bytes.len());
-    let processor = Processor::new();
+    let processor = Processor::default();
     let option = CreateBundledImageOptionsBuilder::new()
         .set_column(2)
         .set_padding(20)
@@ -249,7 +245,7 @@ async fn test_create_bundle_with_text() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 20)]
 async fn text_create_table_image() {
     use super::*;
-    let processor = Processor::new();
+    let processor = Processor::default();
     let head = vec![
         "尺寸".to_string(),
         "大小".to_string(),
@@ -264,8 +260,7 @@ async fn text_create_table_image() {
         "2".to_string(),
         "7.5".to_string(),
     ];
-    let mut body = Vec::new();
-    body.push(row1);
+    let body = vec![row1];
     let table = TableBase::new(head, body, 2).unwrap();
     let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
     let image_bytes = processor
@@ -279,7 +274,7 @@ async fn text_create_table_image() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 20)]
 async fn test_create_text_image() {
     use super::*;
-    let processor = Processor::new();
+    let processor = Processor::default();
     let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
     let image_bytes = processor
         .create_text_image(

@@ -36,11 +36,13 @@ const GRAY_COLOR: Rgba<u8> = image::Rgba([219u8, 219u8, 219u8, 255u8]);
 
 pub struct Processor;
 
-impl Processor {
-    pub fn new() -> Self {
+impl Default for Processor {
+    fn default() -> Self {
         Self
     }
+}
 
+impl Processor {
     pub async fn create_bundled_image_from_bytes(
         &self,
         buffers: Vec<Vec<u8>>,
@@ -578,7 +580,7 @@ impl Table {
         let column_line_end_y = (self.border_width - 1) as f32 + padding + self.table_height();
         for border_shift in 0..self.border_width {
             let mut current_column_line_x = border_shift as f32 + row_line_start_x;
-            for (i, column) in self.head.iter().enumerate() {
+            for column in self.head.iter() {
                 let column_top_line = (
                     (current_column_line_x, column_line_start_y),
                     (current_column_line_x, column_line_end_y),
@@ -648,6 +650,16 @@ pub struct CreateBundledImageOptionsBuilder {
     member_dimension: Option<(u32, u32)>,
     column: Option<u32>,
     padding: Option<u32>,
+}
+
+impl Default for CreateBundledImageOptionsBuilder {
+    fn default() -> Self {
+        Self {
+            member_dimension: None,
+            column: None,
+            padding: None,
+        }
+    }
 }
 
 impl CreateBundledImageOptionsBuilder {
