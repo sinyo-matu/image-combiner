@@ -248,17 +248,17 @@ async fn text_create_table_image() {
     let processor = Processor::default();
     let head = vec![
         "尺寸".to_string(),
-        "大小".to_string(),
-        "脚背周长".to_string(),
-        "鞋跟高度".to_string(),
-        "鞋底宽度".to_string(),
+        "长度".to_string(),
+        "宽度".to_string(),
+        "高度".to_string(),
+        "宽度".to_string(),
     ];
     let row1 = vec![
-        "S".to_string(),
-        "22.5".to_string(),
-        "14".to_string(),
-        "2".to_string(),
-        "7.5".to_string(),
+        "FREE".to_string(),
+        "7.5（小s）".to_string(),
+        "14（小）".to_string(),
+        "2（小）".to_string(),
+        "7.5（小）".to_string(),
     ];
     let body = vec![row1];
     let table = TableBase::new(head, body, 2).unwrap();

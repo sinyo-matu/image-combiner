@@ -212,7 +212,7 @@ impl Processor {
             return Err(ProcessorError::InvalidTableError(format!(
                 "table size over table width is {},canvas width is {}",
                 table_canvas_width.ceil() as u32,
-                bundled_image_canvas_width
+                table_canvas_width.ceil()
             )));
         };
 
@@ -370,20 +370,15 @@ impl Processor {
         let table = table_base.build(cell_padding_x, cell_padding_y, font_size);
         let table_canvas_height = table.table_height().ceil() as u32 + padding.ceil() as u32 * 2;
         let table_canvas_width = table.table_width() + padding * 2.0;
-        if table_canvas_width.ceil() as u32 > canvas_width {
-            debug!("table width would be bigger than origin image width return error");
-            return Err(ProcessorError::InvalidTableError(format!(
-                "table size over table width is {},canvas width is {}",
-                table_canvas_width.ceil() as u32,
-                canvas_width
-            )));
-        };
 
-        let mut image_buf =
-            ImageBuffer::from_fn(canvas_width, table_canvas_height, |_, _| WHITE_COLOR);
+        let mut image_buf = ImageBuffer::from_fn(
+            table_canvas_width.ceil() as u32,
+            table_canvas_height,
+            |_, _| WHITE_COLOR,
+        );
         let font: Font<'_> = Font::try_from_bytes(font_bytes).unwrap();
         for (top, left, text) in
-            table.text_top_left_position(padding, canvas_width as f32, cell_padding_y)
+            table.text_top_left_position(padding, table_canvas_width.ceil(), cell_padding_y)
         {
             draw_text_mut(
                 &mut image_buf,
@@ -395,7 +390,7 @@ impl Processor {
                 text,
             );
         }
-        for (start, end) in table.table_line_position(padding, canvas_width as f32) {
+        for (start, end) in table.table_line_position(padding, table_canvas_width.ceil()) {
             draw_line_segment_mut(&mut image_buf, start, end, GRAY_COLOR);
         }
 
@@ -440,7 +435,7 @@ impl Processor {
         Ok(image_bytes)
     }
 }
-
+#[derive(Clone)]
 pub struct TableBase {
     head: Vec<String>,
     body: Vec<Vec<String>>,
@@ -473,8 +468,16 @@ impl TableBase {
     fn build(self, cell_padding_x: f32, cell_padding_y: f32, cell_font_size: f32) -> Table {
         let mut head: Vec<TableCell> = Vec::new();
         let cell_height = cell_padding_y * 2.0 + cell_font_size + self.border_width as f32;
-        for column in self.head.into_iter() {
-            let text_len = cell_font_size * calc_chars_len(&column) as f32;
+        for (i, column) in self.head.iter().enumerate() {
+            let longest_column_len =
+                (0..self.body.len()).fold(calc_chars_len(column), |acc, body_row_index| {
+                    let body_row_len = calc_chars_len(self.body[body_row_index][i].as_str());
+                    if body_row_len > acc {
+                        return body_row_len;
+                    }
+                    acc
+                });
+            let text_len = cell_font_size * longest_column_len as f32;
             let width = cell_padding_x * 2.0 + self.border_width as f32 + text_len;
             let cell = TableCell::new(width, cell_height, column, cell_font_size);
             head.push(cell);
@@ -486,7 +489,12 @@ impl TableBase {
             let mut row: Vec<TableCell> = Vec::new();
             for (j, column) in row_string.into_iter().enumerate() {
                 let width = head[j].width;
-                row.push(TableCell::new(width, cell_height, column, cell_font_size));
+                row.push(TableCell::new(
+                    width,
+                    cell_height,
+                    column.as_str(),
+                    cell_font_size,
+                ));
             }
             body.push(row);
         }
@@ -620,12 +628,12 @@ pub struct TableCell {
 }
 
 impl TableCell {
-    fn new(width: f32, height: f32, text: String, font_size: f32) -> Self {
-        let chars_count = calc_chars_len(&text);
+    fn new(width: f32, height: f32, text: &str, font_size: f32) -> Self {
+        let chars_count = calc_chars_len(text);
         Self {
             width,
             height,
-            text,
+            text: text.to_owned(),
             text_len: chars_count as f32 * font_size,
         }
     }
@@ -694,16 +702,12 @@ impl CreateBundledImageOptionsBuilder {
 }
 
 fn calc_chars_len(s: &str) -> usize {
-    if s.is_ascii() {
-        let len = s.chars().count() / 2;
-        if len < 1 {
-            1
-        } else {
-            len
+    s.chars().fold(0.0, |acc, c| {
+        if c.is_ascii() {
+            return acc + 0.5;
         }
-    } else {
-        s.chars().count()
-    }
+        acc + 1.0
+    }) as usize
 }
 
 fn load_images_from_vec(buffers: Vec<Vec<u8>>) -> Result<Vec<DynamicImage>, ProcessorError> {
