@@ -360,7 +360,7 @@ impl Processor {
         table_base: TableBase,
         font_bytes: &'_ [u8],
     ) -> Result<Vec<u8>, ProcessorError> {
-        let canvas_width = 960u32;
+        let mut canvas_width = 960u32;
 
         let padding = canvas_width as f32 * 0.05;
         let font_size = (canvas_width as f32 - padding * 2.0) * 0.03;
@@ -370,15 +370,14 @@ impl Processor {
         let table = table_base.build(cell_padding_x, cell_padding_y, font_size);
         let table_canvas_height = table.table_height().ceil() as u32 + padding.ceil() as u32 * 2;
         let table_canvas_width = table.table_width() + padding * 2.0;
-
-        let mut image_buf = ImageBuffer::from_fn(
-            table_canvas_width.ceil() as u32,
-            table_canvas_height,
-            |_, _| WHITE_COLOR,
-        );
+        if table_canvas_width.ceil() as u32 > canvas_width {
+            canvas_width = table_canvas_width.ceil() as u32 + 100
+        }
+        let mut image_buf =
+            ImageBuffer::from_fn(canvas_width, table_canvas_height, |_, _| WHITE_COLOR);
         let font: Font<'_> = Font::try_from_bytes(font_bytes).unwrap();
         for (top, left, text) in
-            table.text_top_left_position(padding, table_canvas_width.ceil(), cell_padding_y)
+            table.text_top_left_position(padding, canvas_width as f32, cell_padding_y)
         {
             draw_text_mut(
                 &mut image_buf,
@@ -390,7 +389,7 @@ impl Processor {
                 text,
             );
         }
-        for (start, end) in table.table_line_position(padding, table_canvas_width.ceil()) {
+        for (start, end) in table.table_line_position(padding, canvas_width as f32) {
             draw_line_segment_mut(&mut image_buf, start, end, GRAY_COLOR);
         }
 
