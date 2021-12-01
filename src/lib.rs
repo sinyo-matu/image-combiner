@@ -6,27 +6,37 @@ use imageproc::drawing::{draw_line_segment_mut, draw_text_mut};
 use log::debug;
 use rusttype::{Font, Scale};
 use std::collections::HashMap;
+use std::error::Error;
+
 use std::sync::Arc;
 use tokio::task::JoinError;
 use tokio::{sync::Mutex, task::JoinHandle};
 
 #[derive(Debug)]
-pub enum ProcessorError {
-    ImageProcessError(ImageError),
-    RuntimeError(JoinError),
-    InvalidTableError(String),
-    InvalidTextError(String),
+pub enum ImageCombinerError {
+    ImageProcess(ImageError),
+    Runtime(JoinError),
+    InvalidTable(String),
+    InvalidText(String),
 }
 
-impl From<ImageError> for ProcessorError {
-    fn from(e: ImageError) -> Self {
-        Self::ImageProcessError(e)
+impl std::fmt::Display for ImageCombinerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("ImageCombinerError:{:?}", self))
     }
 }
 
-impl From<JoinError> for ProcessorError {
+impl Error for ImageCombinerError {}
+
+impl From<ImageError> for ImageCombinerError {
+    fn from(e: ImageError) -> Self {
+        Self::ImageProcess(e)
+    }
+}
+
+impl From<JoinError> for ImageCombinerError {
     fn from(e: JoinError) -> Self {
-        Self::RuntimeError(e)
+        Self::Runtime(e)
     }
 }
 
@@ -34,353 +44,102 @@ const BLACK_COLOR: Rgba<u8> = image::Rgba([0u8, 0u8, 0u8, 255u8]);
 const WHITE_COLOR: Rgba<u8> = image::Rgba([255u8, 255u8, 255u8, 0u8]);
 const GRAY_COLOR: Rgba<u8> = image::Rgba([219u8, 219u8, 219u8, 255u8]);
 
-pub struct Processor;
+pub async fn create_bundled_image_from_bytes(
+    buffers: Vec<Vec<u8>>,
+    options: CreateBundledImageOptions,
+) -> Result<Vec<u8>, ImageCombinerError> {
+    debug!("process {} images into 1", buffers.len());
+    let origin_images = load_images_from_vec(buffers)?;
+    let (width, height) = match options.dimension {
+        Some(user_setting_dimension) => user_setting_dimension,
+        None => find_optical_dimension(&origin_images),
+    };
+    let resize_images = resize_images(origin_images, width, height).await?;
+    let row = (resize_images.len() as f32 / options.column as f32).ceil() as u32;
+    let canvas_height = if row >= 1 {
+        height + options.padding
+    } else {
+        height
+    };
+    let canvas_width = if options.column >= 1 {
+        width + options.padding
+    } else {
+        width
+    };
 
-impl Default for Processor {
-    fn default() -> Self {
-        Self
-    }
+    let bundled_image_canvas_height = row * canvas_height;
+    let bundled_image_canvas_width = options.column * canvas_width;
+    debug!(
+        "create image buf {}x{}",
+        bundled_image_canvas_width, bundled_image_canvas_height
+    );
+    let image_buf = ImageBuffer::from_fn(
+        bundled_image_canvas_width,
+        bundled_image_canvas_height,
+        |_, _| WHITE_COLOR,
+    );
+    let image_buf_threaded = Arc::new(Mutex::new(image_buf));
+    draw_bundled_image(
+        Arc::clone(&image_buf_threaded),
+        resize_images,
+        options.column,
+        height,
+        canvas_width,
+        canvas_height,
+        0,
+    )
+    .await?;
+    let dyn_image = DynamicImage::ImageRgba8(image_buf_threaded.lock_owned().await.to_owned());
+    let mut image_bytes = Vec::new();
+    dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
+    Ok(image_bytes)
 }
 
-impl Processor {
-    pub async fn create_bundled_image_from_bytes(
-        &self,
-        buffers: Vec<Vec<u8>>,
-        options: CreateBundledImageOptions,
-    ) -> Result<Vec<u8>, ProcessorError> {
-        debug!("process {} images into 1", buffers.len());
-        let origin_images = load_images_from_vec(buffers)?;
-        let (width, height) = match options.dimension {
-            Some(user_setting_dimension) => user_setting_dimension,
-            None => find_optical_dimension(&origin_images),
-        };
-        let resize_images = resize_images(origin_images, width, height).await?;
-        let row = (resize_images.len() as f32 / options.column as f32).ceil() as u32;
-        let canvas_height = if row >= 1 {
-            height + options.padding
-        } else {
-            height
-        };
-        let canvas_width = if options.column >= 1 {
-            width + options.padding
-        } else {
-            width
-        };
+pub async fn add_table(
+    buffer: Vec<u8>,
+    table_base: TableBase,
+    font_bytes: &'_ [u8],
+) -> Result<Vec<u8>, ImageCombinerError> {
+    let origin_image = image::load_from_memory(&buffer)?;
+    let padding = origin_image.width() as f32 * 0.05;
+    let font_size = (origin_image.width() as f32 - padding * 2.0) * 0.03;
+    debug!("font size is {}", font_size);
+    let cell_padding_x = font_size * 0.75;
+    let cell_padding_y = font_size * 0.25;
+    let table = table_base.build(cell_padding_x, cell_padding_y, font_size);
 
-        let bundled_image_canvas_height = row * canvas_height;
-        let bundled_image_canvas_width = options.column * canvas_width;
-        debug!(
-            "create image buf {}x{}",
-            bundled_image_canvas_width, bundled_image_canvas_height
-        );
-        let image_buf = ImageBuffer::from_fn(
-            bundled_image_canvas_width,
-            bundled_image_canvas_height,
-            |_, _| WHITE_COLOR,
-        );
-        let image_buf_threaded = Arc::new(Mutex::new(image_buf));
-        draw_bundled_image(
-            Arc::clone(&image_buf_threaded),
-            resize_images,
-            options.column,
-            height,
-            canvas_width,
-            canvas_height,
-            0,
-        )
-        .await?;
-        let dyn_image = DynamicImage::ImageRgba8(image_buf_threaded.lock_owned().await.to_owned());
-        let mut image_bytes = Vec::new();
-        dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
-        Ok(image_bytes)
-    }
+    debug!("table width is {}", table.table_width());
+    if table.table_width() > origin_image.width() as f32 {
+        debug!("table width would be bigger than origin image width return error");
+        return Err(ImageCombinerError::InvalidTable(format!(
+            "table size over table width is {},canvas width is {}",
+            table.table_width(),
+            origin_image.width()
+        )));
+    };
 
-    pub async fn add_table(
-        &self,
-        buffer: Vec<u8>,
-        table_base: TableBase,
-        font_bytes: &'_ [u8],
-    ) -> Result<Vec<u8>, ProcessorError> {
-        let origin_image = image::load_from_memory(&buffer)?;
-        let padding = origin_image.width() as f32 * 0.05;
-        let font_size = (origin_image.width() as f32 - padding * 2.0) * 0.03;
-        debug!("font size is {}", font_size);
-        let cell_padding_x = font_size * 0.75;
-        let cell_padding_y = font_size * 0.25;
-        let table = table_base.build(cell_padding_x, cell_padding_y, font_size);
-
-        debug!("table width is {}", table.table_width());
-        if table.table_width() > origin_image.width() as f32 {
-            debug!("table width would be bigger than origin image width return error");
-            return Err(ProcessorError::InvalidTableError(format!(
-                "table size over table width is {},canvas width is {}",
-                table.table_width(),
-                origin_image.width()
-            )));
-        };
-
-        let table_canvas_height = table.table_height().ceil() as u32 + padding as u32 * 2;
-        debug!("table height is {}", table.table_height());
-        let mut full_canvas = ImageBuffer::from_fn(
-            origin_image.width(),
-            origin_image.height() + table_canvas_height,
-            |_, _| image::Rgba([255, 255, 255, 0] as [u8; 4]),
-        );
-        debug!(
-            "full canvas size is width:{} height: {}",
-            origin_image.width(),
-            origin_image.height() + table_canvas_height
-        );
-        //draw table
-        {
-            let mut table_canvas =
-                full_canvas.sub_image(0, 0, origin_image.width(), table_canvas_height);
-            let font: Font<'_> = Font::try_from_bytes(font_bytes).unwrap();
-            for (top, left, text) in
-                table.text_top_left_position(padding, table_canvas.width() as f32, cell_padding_y)
-            {
-                draw_text_mut(
-                    &mut table_canvas,
-                    BLACK_COLOR,
-                    left.ceil() as u32,
-                    top.ceil() as u32,
-                    Scale::uniform(font_size),
-                    &font,
-                    text,
-                );
-            }
-            for (start, end) in table.table_line_position(padding, origin_image.width() as f32) {
-                draw_line_segment_mut(&mut table_canvas, start, end, BLACK_COLOR);
-            }
-        }
-        //draw origin image
-        {
-            debug!("draw origin image");
-            let mut origin_canvas = full_canvas.sub_image(
-                0,
-                table_canvas_height,
-                origin_image.width(),
-                origin_image.height(),
-            );
-            origin_canvas.copy_from(&origin_image, 0, 0)?;
-        }
-
-        let dyn_image = DynamicImage::ImageRgba8(full_canvas);
-        let mut image_bytes = Vec::new();
-        dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
-        Ok(image_bytes)
-    }
-
-    pub async fn create_bundled_image_from_bytes_with_table(
-        &self,
-        buffers: Vec<Vec<u8>>,
-        table_base: TableBase,
-        options: CreateBundledImageOptions,
-        font_bytes: &'_ [u8],
-    ) -> Result<Vec<u8>, ProcessorError> {
-        debug!("process {} images into 1", buffers.len());
-        let origin_images = load_images_from_vec(buffers)?;
-        let (width, height) = match options.dimension {
-            Some(user_setting_dimension) => user_setting_dimension,
-            None => find_optical_dimension(&origin_images),
-        };
-        let resize_images = resize_images(origin_images, width, height).await?;
-        let row = (resize_images.len() as f32 / options.column as f32).ceil() as u32;
-        let canvas_height = if row >= 1 {
-            height + options.padding
-        } else {
-            height
-        };
-        let canvas_width = if options.column >= 1 {
-            width + options.padding
-        } else {
-            width
-        };
-
-        let bundled_image_canvas_height = row * canvas_height;
-        let bundled_image_canvas_width = options.column * canvas_width;
-        let padding = bundled_image_canvas_width as f32 * 0.05;
-        let font_size = (bundled_image_canvas_width as f32 - padding * 2.0) * 0.03;
-        debug!("font size is {}", font_size);
-        let cell_padding_x = font_size * 0.75;
-        let cell_padding_y = font_size * 0.25;
-        let table = table_base.build(cell_padding_x, cell_padding_y, font_size);
-        let table_canvas_height = table.table_height().ceil() as u32 + padding.ceil() as u32 * 2;
-        let table_canvas_width = table.table_width() + padding * 2.0;
-        if table_canvas_width.ceil() as u32 > bundled_image_canvas_width {
-            debug!("table width would be bigger than origin image width return error");
-            return Err(ProcessorError::InvalidTableError(format!(
-                "table size over table width is {},canvas width is {}",
-                table_canvas_width.ceil() as u32,
-                table_canvas_width.ceil()
-            )));
-        };
-
-        let full_canvas_height = bundled_image_canvas_height + table_canvas_height;
-        debug!(
-            "create image buf {}x{}",
-            bundled_image_canvas_width, full_canvas_height
-        );
-        let image_buf =
-            ImageBuffer::from_fn(bundled_image_canvas_width, full_canvas_height, |_, _| {
-                WHITE_COLOR
-            });
-        let image_buf_threaded = Arc::new(Mutex::new(image_buf));
-        draw_bundled_image(
-            Arc::clone(&image_buf_threaded),
-            resize_images,
-            options.column,
-            height,
-            canvas_width,
-            canvas_height,
-            table_canvas_height,
-        )
-        .await?;
-        {
-            let mut image_buf_lock = image_buf_threaded.lock().await;
-            let mut table_canvas =
-                image_buf_lock.sub_image(0, 0, bundled_image_canvas_width, table_canvas_height);
-            let font: Font<'_> = Font::try_from_bytes(font_bytes).unwrap();
-            for (top, left, text) in table.text_top_left_position(
-                padding,
-                bundled_image_canvas_width as f32,
-                cell_padding_y,
-            ) {
-                draw_text_mut(
-                    &mut table_canvas,
-                    BLACK_COLOR,
-                    left.ceil() as u32,
-                    top.ceil() as u32,
-                    Scale::uniform(font_size),
-                    &font,
-                    text,
-                );
-            }
-            for (start, end) in
-                table.table_line_position(padding, bundled_image_canvas_width as f32)
-            {
-                draw_line_segment_mut(&mut table_canvas, start, end, GRAY_COLOR);
-            }
-        }
-
-        let dyn_image = DynamicImage::ImageRgba8(image_buf_threaded.lock_owned().await.to_owned());
-        let mut image_bytes = Vec::new();
-        dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
-        Ok(image_bytes)
-    }
-
-    pub async fn create_bundled_image_from_bytes_with_text<'a>(
-        &self,
-        buffers: Vec<Vec<u8>>,
-        text: &'a str,
-        options: CreateBundledImageOptions,
-        font_bytes: &'a [u8],
-    ) -> Result<Vec<u8>, ProcessorError> {
-        debug!("process {} images into 1", buffers.len());
-        let origin_images = load_images_from_vec(buffers)?;
-        let (width, height) = match options.dimension {
-            Some(user_setting_dimension) => user_setting_dimension,
-            None => find_optical_dimension(&origin_images),
-        };
-        let resize_images = resize_images(origin_images, width, height).await?;
-        let row = (resize_images.len() as f32 / options.column as f32).ceil() as u32;
-        let canvas_height = if row >= 1 {
-            height + options.padding
-        } else {
-            height
-        };
-        let canvas_width = if options.column >= 1 {
-            width + options.padding
-        } else {
-            width
-        };
-
-        let bundled_image_canvas_height = row * canvas_height;
-        let bundled_image_canvas_width = options.column * canvas_width;
-        let padding = bundled_image_canvas_width as f32 * 0.05;
-        let font_size = (bundled_image_canvas_width as f32 - padding * 2.0) * 0.03;
-        debug!("font size is {}", font_size);
-        let text_canvas_width = calc_chars_len(text) as f32 * font_size + padding * 2.0;
-        if text_canvas_width.ceil() as u32 > bundled_image_canvas_width {
-            return Err(ProcessorError::InvalidTextError(format!(
-                "text canvas width is bigger than image canvas text:{},image:{}",
-                text_canvas_width.ceil() as u32,
-                bundled_image_canvas_width
-            )));
-        }
-        let text_canvas_height = (font_size + padding * 2.0).ceil() as u32;
-
-        let full_canvas_height = bundled_image_canvas_height + text_canvas_height;
-        debug!(
-            "create image buf {}x{}",
-            bundled_image_canvas_width, full_canvas_height
-        );
-        let image_buf =
-            ImageBuffer::from_fn(bundled_image_canvas_width, full_canvas_height, |_, _| {
-                WHITE_COLOR
-            });
-        let image_buf_threaded = Arc::new(Mutex::new(image_buf));
-        draw_bundled_image(
-            Arc::clone(&image_buf_threaded),
-            resize_images,
-            options.column,
-            height,
-            canvas_width,
-            canvas_height,
-            text_canvas_height,
-        )
-        .await?;
-        {
-            let font: Font<'a> = Font::try_from_bytes(font_bytes).unwrap();
-            let mut image_buf_threaded_locked = image_buf_threaded.lock().await;
-            let mut text_canvas = image_buf_threaded_locked.sub_image(
-                0,
-                0,
-                bundled_image_canvas_width,
-                text_canvas_height,
-            );
-            draw_text_mut(
-                &mut text_canvas,
-                BLACK_COLOR,
-                padding.ceil() as u32,
-                padding.ceil() as u32,
-                Scale::uniform(font_size),
-                &font,
-                text,
-            );
-        }
-        let dyn_image = DynamicImage::ImageRgba8(image_buf_threaded.lock_owned().await.to_owned());
-        let mut image_bytes = Vec::new();
-        dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
-        Ok(image_bytes)
-    }
-
-    pub async fn create_table_image(
-        &self,
-        table_base: TableBase,
-        font_bytes: &'_ [u8],
-    ) -> Result<Vec<u8>, ProcessorError> {
-        let mut canvas_width = 960u32;
-
-        let padding = canvas_width as f32 * 0.05;
-        let font_size = (canvas_width as f32 - padding * 2.0) * 0.03;
-        debug!("font size is {}", font_size);
-        let cell_padding_x = font_size * 0.75;
-        let cell_padding_y = font_size * 0.25;
-        let table = table_base.build(cell_padding_x, cell_padding_y, font_size);
-        let table_canvas_height = table.table_height().ceil() as u32 + padding.ceil() as u32 * 2;
-        let table_canvas_width = table.table_width() + padding * 2.0;
-        if table_canvas_width.ceil() as u32 > canvas_width {
-            canvas_width = table_canvas_width.ceil() as u32 + 100
-        }
-        let mut image_buf =
-            ImageBuffer::from_fn(canvas_width, table_canvas_height, |_, _| WHITE_COLOR);
+    let table_canvas_height = table.table_height().ceil() as u32 + padding as u32 * 2;
+    debug!("table height is {}", table.table_height());
+    let mut full_canvas = ImageBuffer::from_fn(
+        origin_image.width(),
+        origin_image.height() + table_canvas_height,
+        |_, _| image::Rgba([255, 255, 255, 0] as [u8; 4]),
+    );
+    debug!(
+        "full canvas size is width:{} height: {}",
+        origin_image.width(),
+        origin_image.height() + table_canvas_height
+    );
+    //draw table
+    {
+        let mut table_canvas =
+            full_canvas.sub_image(0, 0, origin_image.width(), table_canvas_height);
         let font: Font<'_> = Font::try_from_bytes(font_bytes).unwrap();
         for (top, left, text) in
-            table.text_top_left_position(padding, canvas_width as f32, cell_padding_y)
+            table.text_top_left_position(padding, table_canvas.width() as f32, cell_padding_y)
         {
             draw_text_mut(
-                &mut image_buf,
+                &mut table_canvas,
                 BLACK_COLOR,
                 left.ceil() as u32,
                 top.ceil() as u32,
@@ -389,35 +148,188 @@ impl Processor {
                 text,
             );
         }
-        for (start, end) in table.table_line_position(padding, canvas_width as f32) {
-            draw_line_segment_mut(&mut image_buf, start, end, GRAY_COLOR);
+        for (start, end) in table.table_line_position(padding, origin_image.width() as f32) {
+            draw_line_segment_mut(&mut table_canvas, start, end, BLACK_COLOR);
         }
-
-        let dyn_image = DynamicImage::ImageRgba8(image_buf);
-        let mut image_bytes = Vec::new();
-        dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
-        Ok(image_bytes)
+    }
+    //draw origin image
+    {
+        debug!("draw origin image");
+        let mut origin_canvas = full_canvas.sub_image(
+            0,
+            table_canvas_height,
+            origin_image.width(),
+            origin_image.height(),
+        );
+        origin_canvas.copy_from(&origin_image, 0, 0)?;
     }
 
-    pub async fn create_text_image<'a>(
-        &self,
-        text: &'a str,
-        font_bytes: &'a [u8],
-    ) -> Result<Vec<u8>, ProcessorError> {
-        let mut canvas_width = 960u32;
+    let dyn_image = DynamicImage::ImageRgba8(full_canvas);
+    let mut image_bytes = Vec::new();
+    dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
+    Ok(image_bytes)
+}
 
-        let padding = canvas_width as f32 * 0.05;
-        let font_size = (canvas_width as f32 - padding * 2.0) * 0.03;
-        debug!("font size is {}", font_size);
-        let text_canvas_width = calc_chars_len(text) as f32 * font_size + padding * 2.0;
-        if text_canvas_width.ceil() as u32 > canvas_width {
-            canvas_width = text_canvas_width.ceil() as u32 + 100;
+pub async fn create_bundled_image_from_bytes_with_table(
+    buffers: Vec<Vec<u8>>,
+    table_base: TableBase,
+    options: CreateBundledImageOptions,
+    font_bytes: &'_ [u8],
+) -> Result<Vec<u8>, ImageCombinerError> {
+    debug!("process {} images into 1", buffers.len());
+    let origin_images = load_images_from_vec(buffers)?;
+    let (width, height) = match options.dimension {
+        Some(user_setting_dimension) => user_setting_dimension,
+        None => find_optical_dimension(&origin_images),
+    };
+    let resize_images = resize_images(origin_images, width, height).await?;
+    let row = (resize_images.len() as f32 / options.column as f32).ceil() as u32;
+    let canvas_height = if row >= 1 {
+        height + options.padding
+    } else {
+        height
+    };
+    let canvas_width = if options.column >= 1 {
+        width + options.padding
+    } else {
+        width
+    };
+
+    let bundled_image_canvas_height = row * canvas_height;
+    let bundled_image_canvas_width = options.column * canvas_width;
+    let padding = bundled_image_canvas_width as f32 * 0.05;
+    let font_size = (bundled_image_canvas_width as f32 - padding * 2.0) * 0.03;
+    debug!("font size is {}", font_size);
+    let cell_padding_x = font_size * 0.75;
+    let cell_padding_y = font_size * 0.25;
+    let table = table_base.build(cell_padding_x, cell_padding_y, font_size);
+    let table_canvas_height = table.table_height().ceil() as u32 + padding.ceil() as u32 * 2;
+    let table_canvas_width = table.table_width() + padding * 2.0;
+    if table_canvas_width.ceil() as u32 > bundled_image_canvas_width {
+        debug!("table width would be bigger than origin image width return error");
+        return Err(ImageCombinerError::InvalidTable(format!(
+            "table size over table width is {},canvas width is {}",
+            table_canvas_width.ceil() as u32,
+            table_canvas_width.ceil()
+        )));
+    };
+
+    let full_canvas_height = bundled_image_canvas_height + table_canvas_height;
+    debug!(
+        "create image buf {}x{}",
+        bundled_image_canvas_width, full_canvas_height
+    );
+    let image_buf = ImageBuffer::from_fn(bundled_image_canvas_width, full_canvas_height, |_, _| {
+        WHITE_COLOR
+    });
+    let image_buf_threaded = Arc::new(Mutex::new(image_buf));
+    draw_bundled_image(
+        Arc::clone(&image_buf_threaded),
+        resize_images,
+        options.column,
+        height,
+        canvas_width,
+        canvas_height,
+        table_canvas_height,
+    )
+    .await?;
+    {
+        let mut image_buf_lock = image_buf_threaded.lock().await;
+        let mut table_canvas =
+            image_buf_lock.sub_image(0, 0, bundled_image_canvas_width, table_canvas_height);
+        let font: Font<'_> = Font::try_from_bytes(font_bytes).unwrap();
+        for (top, left, text) in
+            table.text_top_left_position(padding, bundled_image_canvas_width as f32, cell_padding_y)
+        {
+            draw_text_mut(
+                &mut table_canvas,
+                BLACK_COLOR,
+                left.ceil() as u32,
+                top.ceil() as u32,
+                Scale::uniform(font_size),
+                &font,
+                text,
+            );
         }
-        let text_canvas_height = (font_size + padding * 2.0).ceil() as u32;
-        let mut text_canvas =
-            ImageBuffer::from_fn(canvas_width, text_canvas_height, |_, _| WHITE_COLOR);
+        for (start, end) in table.table_line_position(padding, bundled_image_canvas_width as f32) {
+            draw_line_segment_mut(&mut table_canvas, start, end, GRAY_COLOR);
+        }
+    }
 
+    let dyn_image = DynamicImage::ImageRgba8(image_buf_threaded.lock_owned().await.to_owned());
+    let mut image_bytes = Vec::new();
+    dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
+    Ok(image_bytes)
+}
+
+pub async fn create_bundled_image_from_bytes_with_text<'a>(
+    buffers: Vec<Vec<u8>>,
+    text: &'a str,
+    options: CreateBundledImageOptions,
+    font_bytes: &'a [u8],
+) -> Result<Vec<u8>, ImageCombinerError> {
+    debug!("process {} images into 1", buffers.len());
+    let origin_images = load_images_from_vec(buffers)?;
+    let (width, height) = match options.dimension {
+        Some(user_setting_dimension) => user_setting_dimension,
+        None => find_optical_dimension(&origin_images),
+    };
+    let resize_images = resize_images(origin_images, width, height).await?;
+    let row = (resize_images.len() as f32 / options.column as f32).ceil() as u32;
+    let canvas_height = if row >= 1 {
+        height + options.padding
+    } else {
+        height
+    };
+    let canvas_width = if options.column >= 1 {
+        width + options.padding
+    } else {
+        width
+    };
+
+    let bundled_image_canvas_height = row * canvas_height;
+    let bundled_image_canvas_width = options.column * canvas_width;
+    let padding = bundled_image_canvas_width as f32 * 0.05;
+    let font_size = (bundled_image_canvas_width as f32 - padding * 2.0) * 0.03;
+    debug!("font size is {}", font_size);
+    let text_canvas_width = calc_chars_len(text) as f32 * font_size + padding * 2.0;
+    if text_canvas_width.ceil() as u32 > bundled_image_canvas_width {
+        return Err(ImageCombinerError::InvalidText(format!(
+            "text canvas width is bigger than image canvas text:{},image:{}",
+            text_canvas_width.ceil() as u32,
+            bundled_image_canvas_width
+        )));
+    }
+    let text_canvas_height = (font_size + padding * 2.0).ceil() as u32;
+
+    let full_canvas_height = bundled_image_canvas_height + text_canvas_height;
+    debug!(
+        "create image buf {}x{}",
+        bundled_image_canvas_width, full_canvas_height
+    );
+    let image_buf = ImageBuffer::from_fn(bundled_image_canvas_width, full_canvas_height, |_, _| {
+        WHITE_COLOR
+    });
+    let image_buf_threaded = Arc::new(Mutex::new(image_buf));
+    draw_bundled_image(
+        Arc::clone(&image_buf_threaded),
+        resize_images,
+        options.column,
+        height,
+        canvas_width,
+        canvas_height,
+        text_canvas_height,
+    )
+    .await?;
+    {
         let font: Font<'a> = Font::try_from_bytes(font_bytes).unwrap();
+        let mut image_buf_threaded_locked = image_buf_threaded.lock().await;
+        let mut text_canvas = image_buf_threaded_locked.sub_image(
+            0,
+            0,
+            bundled_image_canvas_width,
+            text_canvas_height,
+        );
         draw_text_mut(
             &mut text_canvas,
             BLACK_COLOR,
@@ -427,12 +339,87 @@ impl Processor {
             &font,
             text,
         );
-
-        let dyn_image = DynamicImage::ImageRgba8(text_canvas);
-        let mut image_bytes = Vec::new();
-        dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
-        Ok(image_bytes)
     }
+    let dyn_image = DynamicImage::ImageRgba8(image_buf_threaded.lock_owned().await.to_owned());
+    let mut image_bytes = Vec::new();
+    dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
+    Ok(image_bytes)
+}
+
+pub async fn create_table_image(
+    table_base: TableBase,
+    font_bytes: &'_ [u8],
+) -> Result<Vec<u8>, ImageCombinerError> {
+    let mut canvas_width = 960u32;
+
+    let padding = canvas_width as f32 * 0.05;
+    let font_size = (canvas_width as f32 - padding * 2.0) * 0.03;
+    debug!("font size is {}", font_size);
+    let cell_padding_x = font_size * 0.75;
+    let cell_padding_y = font_size * 0.25;
+    let table = table_base.build(cell_padding_x, cell_padding_y, font_size);
+    let table_canvas_height = table.table_height().ceil() as u32 + padding.ceil() as u32 * 2;
+    let table_canvas_width = table.table_width() + padding * 2.0;
+    if table_canvas_width.ceil() as u32 > canvas_width {
+        canvas_width = table_canvas_width.ceil() as u32 + 100
+    }
+    let mut image_buf = ImageBuffer::from_fn(canvas_width, table_canvas_height, |_, _| WHITE_COLOR);
+    let font: Font<'_> = Font::try_from_bytes(font_bytes).unwrap();
+    for (top, left, text) in
+        table.text_top_left_position(padding, canvas_width as f32, cell_padding_y)
+    {
+        draw_text_mut(
+            &mut image_buf,
+            BLACK_COLOR,
+            left.ceil() as u32,
+            top.ceil() as u32,
+            Scale::uniform(font_size),
+            &font,
+            text,
+        );
+    }
+    for (start, end) in table.table_line_position(padding, canvas_width as f32) {
+        draw_line_segment_mut(&mut image_buf, start, end, GRAY_COLOR);
+    }
+
+    let dyn_image = DynamicImage::ImageRgba8(image_buf);
+    let mut image_bytes = Vec::new();
+    dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
+    Ok(image_bytes)
+}
+
+pub async fn create_text_image<'a>(
+    text: &'a str,
+    font_bytes: &'a [u8],
+) -> Result<Vec<u8>, ImageCombinerError> {
+    let mut canvas_width = 960u32;
+
+    let padding = canvas_width as f32 * 0.05;
+    let font_size = (canvas_width as f32 - padding * 2.0) * 0.03;
+    debug!("font size is {}", font_size);
+    let text_canvas_width = calc_chars_len(text) as f32 * font_size + padding * 2.0;
+    if text_canvas_width.ceil() as u32 > canvas_width {
+        canvas_width = text_canvas_width.ceil() as u32 + 100;
+    }
+    let text_canvas_height = (font_size + padding * 2.0).ceil() as u32;
+    let mut text_canvas =
+        ImageBuffer::from_fn(canvas_width, text_canvas_height, |_, _| WHITE_COLOR);
+
+    let font: Font<'a> = Font::try_from_bytes(font_bytes).unwrap();
+    draw_text_mut(
+        &mut text_canvas,
+        BLACK_COLOR,
+        padding.ceil() as u32,
+        padding.ceil() as u32,
+        Scale::uniform(font_size),
+        &font,
+        text,
+    );
+
+    let dyn_image = DynamicImage::ImageRgba8(text_canvas);
+    let mut image_bytes = Vec::new();
+    dyn_image.write_to(&mut image_bytes, image::ImageOutputFormat::Jpeg(100))?;
+    Ok(image_bytes)
 }
 #[derive(Clone)]
 pub struct TableBase {
@@ -446,11 +433,11 @@ impl TableBase {
         head: Vec<String>,
         body: Vec<Vec<String>>,
         border_width: u32,
-    ) -> Result<Self, ProcessorError> {
+    ) -> Result<Self, ImageCombinerError> {
         for row in body.iter() {
             if row.len() != head.len() {
                 debug!("body colum is not equal to head column");
-                return Err(ProcessorError::InvalidTableError(format!(
+                return Err(ImageCombinerError::InvalidTable(format!(
                     "body colum is not equal to head column head:{},body:{}",
                     head.len(),
                     row.len()
@@ -709,7 +696,7 @@ fn calc_chars_len(s: &str) -> usize {
     }) as usize
 }
 
-fn load_images_from_vec(buffers: Vec<Vec<u8>>) -> Result<Vec<DynamicImage>, ProcessorError> {
+fn load_images_from_vec(buffers: Vec<Vec<u8>>) -> Result<Vec<DynamicImage>, ImageCombinerError> {
     let mut origin_images: Vec<DynamicImage> = Vec::new();
     for buf in buffers {
         let origin_image = image::load_from_memory(&buf)?;
@@ -722,7 +709,7 @@ async fn resize_images(
     images: Vec<DynamicImage>,
     target_image_width: u32,
     target_image_height: u32,
-) -> Result<Vec<DynamicImage>, ProcessorError> {
+) -> Result<Vec<DynamicImage>, ImageCombinerError> {
     let mut resized_images_handles: Vec<JoinHandle<DynamicImage>> = Vec::new();
     for (i, mut origin_image) in images.into_iter().enumerate() {
         let handle = tokio::spawn(async move {
@@ -753,8 +740,8 @@ async fn draw_bundled_image(
     image_canvas_width: u32,
     image_canvas_height: u32,
     bundled_image_canvas_y: u32,
-) -> Result<(), ProcessorError> {
-    let mut handles: Vec<JoinHandle<Result<(), ProcessorError>>> = Vec::new();
+) -> Result<(), ImageCombinerError> {
+    let mut handles: Vec<JoinHandle<Result<(), ImageCombinerError>>> = Vec::new();
     for (i, image) in images.into_iter().enumerate() {
         let cloned_image_buf = Arc::clone(&image_buf_threaded);
         let handle = tokio::spawn(async move {

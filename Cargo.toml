@@ -2,7 +2,7 @@
 name = "image-combiner"
 version = "0.1.12"
 edition = "2018"
-authors = ["sinyo-matu <seelerei0130@gmail.com>"]
+authors = ["sinyo-matu <sinyo_matu@icloud.com>"]
 keywords =["image"]
 description = "a simple image combiner"
 repository = "https://github.com/sinyo-matu/image-combiner"

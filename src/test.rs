@@ -31,13 +31,11 @@ async fn test_processor() {
         image_bytes.push(image_byte);
     }
     println!("get {} pics", image_bytes.len());
-    let processor = Processor::default();
     let option = CreateBundledImageOptionsBuilder::new()
         .set_column(2)
         .set_padding(20)
         .build();
-    let image_bytes = processor
-        .create_bundled_image_from_bytes(image_bytes, option)
+    let image_bytes = create_bundled_image_from_bytes(image_bytes, option)
         .await
         .unwrap();
     // image::load_from_memory(&image_bytes)
@@ -61,7 +59,6 @@ async fn text_add_table() {
         .set_time_format("%F:%T".to_string())
         .build();
     simplelog::SimpleLogger::init(simplelog::LevelFilter::Debug, config).unwrap();
-    let processor = Processor::default();
     let origin_image = std::fs::read("./test/A2113PE_225_bundled_column2.jpeg").unwrap();
     let head = vec![
         "SIZE".to_string(),
@@ -90,10 +87,7 @@ async fn text_add_table() {
     let body = vec![row1, row2];
     let table = TableBase::new(head, body, 2).unwrap();
     let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
-    let new_image = processor
-        .add_table(origin_image, table, &font_bytes)
-        .await
-        .unwrap();
+    let new_image = add_table(origin_image, table, &font_bytes).await.unwrap();
     std::fs::write("./test/add_table.jpeg", &new_image).unwrap();
 }
 
@@ -130,7 +124,6 @@ async fn test_create_bundle_with_table() {
         image_bytes.push(image_byte);
     }
     println!("get {} pics", image_bytes.len());
-    let processor = Processor::default();
     let option = CreateBundledImageOptionsBuilder::new()
         .set_column(2)
         .set_padding(20)
@@ -162,10 +155,10 @@ async fn test_create_bundle_with_table() {
     let body = vec![row1, row2];
     let table = TableBase::new(head, body, 2).unwrap();
     let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
-    let image_bytes = processor
-        .create_bundled_image_from_bytes_with_table(image_bytes, table, option, &font_bytes)
-        .await
-        .unwrap();
+    let image_bytes =
+        create_bundled_image_from_bytes_with_table(image_bytes, table, option, &font_bytes)
+            .await
+            .unwrap();
     // image::load_from_memory(&image_bytes)
     //     .unwrap()
     //     .save(format!("{}_bundled.jpeg", item_code))
@@ -213,21 +206,19 @@ async fn test_create_bundle_with_text() {
         image_bytes.push(image_byte);
     }
     println!("get {} pics", image_bytes.len());
-    let processor = Processor::default();
     let option = CreateBundledImageOptionsBuilder::new()
         .set_column(2)
         .set_padding(20)
         .build();
     let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
-    let image_bytes = processor
-        .create_bundled_image_from_bytes_with_text(
-            image_bytes,
-            &"长60.0，肩宽42.0，体宽52.5，袖长26.5，袖口16.0".replace("，", " "),
-            option,
-            &font_bytes,
-        )
-        .await
-        .unwrap();
+    let image_bytes = create_bundled_image_from_bytes_with_text(
+        image_bytes,
+        &"长60.0，肩宽42.0，体宽52.5，袖长26.5，袖口16.0".replace("，", " "),
+        option,
+        &font_bytes,
+    )
+    .await
+    .unwrap();
     // image::load_from_memory(&image_bytes)
     //     .unwrap()
     //     .save(format!("{}_bundled.jpeg", item_code))
@@ -245,28 +236,22 @@ async fn test_create_bundle_with_text() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 20)]
 async fn text_create_table_image() {
     use super::*;
-    let processor = Processor::default();
     let head = vec![
         "尺寸".to_string(),
+        "肩宽".to_string(),
+        "臂展".to_string(),
         "长度".to_string(),
-        "宽度".to_string(),
-        "高度".to_string(),
-        "宽度".to_string(),
     ];
     let row1 = vec![
         "FREE".to_string(),
-        "7.5（小s）".to_string(),
-        "14（小）".to_string(),
-        "2（小）".to_string(),
-        "7.5（小）".to_string(),
+        "58".to_string(),
+        "78".to_string(),
+        "65.5".to_string(),
     ];
     let body = vec![row1];
     let table = TableBase::new(head, body, 2).unwrap();
     let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
-    let image_bytes = processor
-        .create_table_image(table, &font_bytes)
-        .await
-        .unwrap();
+    let image_bytes = create_table_image(table, &font_bytes).await.unwrap();
 
     std::fs::write("./test/table.jpg", &image_bytes).unwrap();
 }
@@ -274,15 +259,13 @@ async fn text_create_table_image() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 20)]
 async fn test_create_text_image() {
     use super::*;
-    let processor = Processor::default();
     let font_bytes = std::fs::read("./test/TaipeiSansTCBeta-Light.ttf").unwrap();
-    let image_bytes = processor
-        .create_text_image(
-            &"长122.0，肩宽38.0，体宽57.0，袖长30.0，袖口16.0（弹性）。".replace("，", " "),
-            &font_bytes,
-        )
-        .await
-        .unwrap();
+    let image_bytes = create_text_image(
+        &"长122.0，肩宽38.0，体宽57.0，袖长30.0，袖口16.0（弹性）。".replace("，", " "),
+        &font_bytes,
+    )
+    .await
+    .unwrap();
     // image::load_from_memory(&image_bytes)
     //     .unwrap()
     //     .save(format!("{}_bundled.jpeg", item_code))
