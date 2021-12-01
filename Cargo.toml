@@ -1,6 +1,6 @@
 [package]
 name = "image-combiner"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2021"
 authors = ["sinyo-matu <sinyo_matu@icloud.com>"]
 keywords =["image"]
